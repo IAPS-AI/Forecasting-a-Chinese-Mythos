@@ -2,6 +2,17 @@
 ================================================================================
 Mythos catch-up model · v3.1 (canonical, consolidated)
 ================================================================================
+Change from v3.1 -> v3.2:
+  (1) Mythos committed-chip count made uncertain: chips ~ Tri(250k, 500k,
+      750k) Trainium2, replacing the fixed 500k. Rationale (reviewer
+      comment): training location and committed capacity are unknown. The
+      downside (committed fraction < 100% given concurrent RL/experiment
+      workloads) and upside (Rainier ramp toward 1M; possible TPU top-up)
+      roughly offset at the 500k mode. Headline median Feb 22 -> Feb 19 2027;
+      90% CI widens to ~Oct 29 2026 - Sep 09 2027.
+  (2) TODAY bumped 2026-06-12 -> 2026-07-02 (affects lever counterfactuals only).
+  (3) Datawrapper CSV exports added for all published charts.
+
 Change from v3.0: hyperscaler flagship budget gamma_A upper bound raised
 0.015 -> 0.020. Rationale: the revealed reference class tops out at DeepSeek
 ~1.6%, which the old 1.5% ceiling excluded; 2.0% covers the observed maximum
@@ -41,7 +52,7 @@ H100_PEAK  = 9.89e14
 SEC_MONTH  = 30.44 * 24 * 3600
 T_GRID     = np.arange(0, 60.5, 0.5)
 T0         = date(2026, 2, 24)
-TODAY      = date(2026, 6, 12)
+TODAY      = date(2026, 7, 2)
 TODAY_M    = (TODAY - T0).days / 30.44
 OUT        = "/mnt/user-data/outputs"
 import os; os.makedirs(OUT, exist_ok=True)
@@ -83,6 +94,7 @@ P = {
  "DT26":               (150e3, 184e3, 215e3),
  "PR27":               (370e3, 460e3, 540e3),
  "rubin":              (1.2, 1.5, 1.9),
+ "chips":              (250e3, 500e3, 750e3), # v3.2: Trainium2 committed to Mythos pre-training
 }
 ALG = (np.log10(2), np.log10(10), np.log10(50))
 
@@ -105,7 +117,7 @@ def simulate(v, remote="full", smuggle_stop=False, h200_stop=False,
     tg = T_GRID if t_grid is None else t_grid
     T = tg[None, :]
     alg = v["alg"] if distill_r is None else v["alg"] ** (1.0 - distill_r)
-    N_AH = 500_000 * (6.5e14 / 9.89e14)
+    N_AH = v["chips"] * (6.5e14 / 9.89e14)
     mflops = N_AH * H100_PEAK * v["mfu_anthropic"] * v["duration_anthropic"] * SEC_MONTH
     F_EFF  = H100_PEAK * v["mfu_china"] * SEC_MONTH
     myt = mflops[:, None] / alg[:, None] ** (T / 12.0)
@@ -172,7 +184,7 @@ levers = [
 ]
 
 print("=" * 96)
-print(f"Mythos catch-up model v3.1 · N = {N:,} · t=0 = {T0} · today = t+{TODAY_M:.1f} mo")
+print(f"Mythos catch-up model v3.2 · N = {N:,} · t=0 = {T0} · today = t+{TODAY_M:.1f} mo")
 print("=" * 96)
 print("\nBASELINE (world as it is):")
 for ev in ["pre", "ready"]:
@@ -197,6 +209,7 @@ TORNADO = [
  ("Lab budget γ_B",             "gamma_B"),
  ("MFU ratio (China/Anthropic)","__ratio__"),
  ("Mythos training duration",   "duration_anthropic"),
+ ("Mythos committed chips",     "chips"),
  ("Total in-China stock",       "total_in_china"),
  ("Top-firm share",             "top_firm_share"),
  ("Remote access at t=0",       "remote_t0"),
@@ -383,3 +396,55 @@ ax.spines[["top", "right", "left"]].set_visible(False); ax.grid(axis="x", alpha=
 plt.tight_layout(); plt.savefig(f"{OUT}/fig5_tornado.png"); plt.close()
 
 print("\nfigures written: fig1_headline_cdf, fig2_lever_ladder, fig3_gate, fig4_regime_ladder, fig5_tornado")
+
+# ============================================================================
+# DATAWRAPPER CSV EXPORTS (v3.2)
+# ============================================================================
+import csv
+def iso(m): return m2date(m).isoformat()
+
+# fig1 / BpnwG: headline CDF
+with open(f"{OUT}/dw_fig1_cdf.csv", "w", newline="") as f:
+    w = csv.writer(f); w.writerow(["date", "cumulative_probability_pct"])
+    for m in np.arange(0, 30.01, 0.25):
+        w.writerow([iso(m), round((base["ready"] < m).mean() * 100, 2)])
+
+# fig2 / KY67h: lever ladder
+with open(f"{OUT}/dw_fig2_lever_ladder.csv", "w", newline="") as f:
+    w = csv.writer(f); w.writerow(["lever", "median_ready_date", "additional_months_vs_baseline"])
+    b50 = np.percentile(base["ready"], 50)
+    w.writerow(["Baseline", iso(b50), 0.0])
+    for nm, r in levers:
+        q50 = np.percentile(r, 50)
+        w.writerow([nm, iso(q50), round(q50 - b50, 1)])
+
+# fig3 / OVruM: the gate
+with open(f"{OUT}/dw_fig3_gate.csv", "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["date", "required_flop_p10", "required_flop_median", "required_flop_p90",
+                "hyperscaler_budget_median", "remote_revoked_budget_median", "lab_budget_median"])
+    tg = np.arange(0, 24.01, 0.5); idx = (tg / 0.5).astype(int)
+    req = base["mflops"][:, None] / V["alg"][:, None] ** (tg[None, :] / 12.0)
+    r10, r50, r90 = np.percentile(req, [10, 50, 90], axis=0)
+    dom, rem, lab = base["pools"]
+    budA  = np.percentile(12.0 * V["gamma_A"][:, None] * (dom + rem)[:, idx] * base["F_EFF"][:, None], 50, axis=0)
+    budAr = np.percentile(12.0 * V["gamma_A"][:, None] * dom[:, idx]        * base["F_EFF"][:, None], 50, axis=0)
+    budB  = np.percentile(12.0 * V["gamma_B"][:, None] * lab[:, idx]        * base["F_EFF"][:, None], 50, axis=0)
+    for j, m in enumerate(tg):
+        w.writerow([iso(m)] + [f"{x:.3e}" for x in (r10[j], r50[j], r90[j], budA[j], budAr[j], budB[j])])
+
+# fig4 / nenJA: regime ladder
+with open(f"{OUT}/dw_fig4_regimes.csv", "w", newline="") as f:
+    w = csv.writer(f); w.writerow(["regime", "p25_date", "median_date", "p75_date"])
+    for lbl, g, c in regimes:
+        ready_r = np.minimum(track_g(g), base["tB"]) + V["T_post"]
+        q25, q50, q75 = np.percentile(ready_r, [25, 50, 75])
+        w.writerow([lbl.split("\n")[0], iso(q25), iso(q50), iso(q75)])
+
+# fig5 / hRdR0: tornado
+with open(f"{OUT}/dw_fig5_tornado.csv", "w", newline="") as f:
+    w = csv.writer(f); w.writerow(["parameter", "ready_at_param_p10", "ready_at_param_p90", "range_months"])
+    for label, lo, hi in rows:
+        w.writerow([label, iso(lo), iso(hi), round(abs(hi - lo), 1)])
+
+print("datawrapper CSVs written: dw_fig1_cdf, dw_fig2_lever_ladder, dw_fig3_gate, dw_fig4_regimes, dw_fig5_tornado")
