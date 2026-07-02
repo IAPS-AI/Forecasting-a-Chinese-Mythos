@@ -1,6 +1,6 @@
 """
 ================================================================================
-Mythos catch-up model · v3.1 (canonical, consolidated)
+Mythos catch-up model · v3.2 (canonical, consolidated)
 ================================================================================
 Change from v3.1 -> v3.2:
   (1) Mythos committed-chip count made uncertain: chips ~ Tri(250k, 500k,
